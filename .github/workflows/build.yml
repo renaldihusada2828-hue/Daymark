@@ -1,0 +1,99 @@
+name: Build Daymark APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Locate project
+        shell: bash
+        run: |
+          if [ -f "settings.gradle.kts" ]; then
+            PROJECT_DIR="."
+          else
+            ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -1 || true)
+
+            if [ -z "$ZIP_FILE" ]; then
+              echo "::error::Project/ZIP Daymark tidak ditemukan."
+              exit 1
+            fi
+
+            echo "ZIP ditemukan: $ZIP_FILE"
+
+            rm -rf extracted
+            mkdir extracted
+
+            unzip -q "$ZIP_FILE" -d extracted
+
+            PROJECT_DIR=$(find extracted \
+              -type f \
+              -name "settings.gradle.kts" \
+              -printf '%h\n' | head -1)
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "::error::settings.gradle.kts tidak ditemukan."
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Project:"
+          echo "$PROJECT_DIR"
+
+      - name: Check Android SDK
+        shell: bash
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+
+          if [ -z "$SDK" ]; then
+            echo "::error::Android SDK tidak ditemukan."
+            exit 1
+          fi
+
+          echo "Android SDK: $SDK"
+
+          if [ ! -f "$SDK/platforms/android-35/android.jar" ]; then
+            echo "::error::Android API 35 belum tersedia di runner."
+            exit 1
+          fi
+
+          echo "Android SDK API 35 OK."
+
+      - name: Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Check project files
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          echo "=== PROJECT ==="
+          pwd
+
+          echo "=== FILES ==="
+          find . -maxdepth 6 -type f | sort
+
+          echo "=== GRADLE ==="
+          gradle --version
+
+      - name: Build debug APK
+        working-directory: ${{
