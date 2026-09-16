@@ -1,9 +1,11 @@
-name: Build Daymark APK
+
+  name: Build Daymark APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -13,29 +15,151 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: JDK 17
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Locate project
+      - name: Find ZIP
         shell: bash
         run: |
-          if [ -f "settings.gradle.kts" ]; then
-            PROJECT_DIR="."
-          else
-            ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -1 || true)
+          echo "Mencari file ZIP..."
 
-            if [ -z "$ZIP_FILE" ]; then
-              echo "::error::Project/ZIP Daymark tidak ditemukan."
-              exit 1
-            fi
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
 
-            echo "ZIP ditemukan: $ZIP_FILE"
+          if [ -z "$ZIP_FILE" ]; then
+            echo "::error::File ZIP project tidak ditemukan."
+            exit 1
+          fi
+
+          echo "ZIP ditemukan: $ZIP_FILE"
+
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      - name: Extract Project
+        shell: bash
+        run: |
+          rm -rf extracted
+
+          mkdir -p extracted
+
+          unzip -q "$ZIP_FILE" -d extracted
+
+          echo "=== HASIL EXTRACT ==="
+          find extracted -maxdepth 5 -type f | sort
+
+      - name: Find Android Project
+        shell: bash
+        run: |
+          PROJECT_DIR=$(find extracted \
+            -type f \
+            -name "settings.gradle.kts" \
+            -printf '%h\n' \
+            | head -n 1)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "::error::settings.gradle.kts tidak ditemukan."
+            echo "Isi folder extracted:"
+            find extracted -maxdepth 5 -type f | sort
+            exit 1
+          fi
+
+          echo "Project ditemukan:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Check Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          if [ -z "$ANDROID_HOME" ]; then
+            echo "::error::ANDROID_HOME tidak ditemukan."
+            exit 1
+          fi
+
+          echo "=== SDK PLATFORMS ==="
+          ls -la "$ANDROID_HOME/platforms" || true
+
+          echo "=== SDK BUILD TOOLS ==="
+          ls -la "$ANDROID_HOME/build-tools" || true
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Prepare Project
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "=== PROJECT DIRECTORY ==="
+          pwd
+
+          echo "=== PROJECT FILES ==="
+          find . -maxdepth 6 -type f | sort
+
+          echo "=== GRADLE VERSION ==="
+          gradle --version
+
+      - name: Build APK
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "================================"
+          echo "BUILD DAYMARK APK"
+          echo "================================"
+
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            --warning-mode all
+
+      - name: Check APK
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+
+          echo "Mengecek APK..."
+
+          if [ ! -f "$APK_PATH" ]; then
+            echo "::error::APK tidak ditemukan."
+            echo "Isi folder output:"
+            find app/build/outputs -type f 2>/dev/null || true
+            exit 1
+          fi
+
+          echo ""
+          echo "================================"
+          echo "APK BERHASIL"
+          echo "================================"
+
+          ls -lh "$APK_PATH"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daymark-APK
+          path: extracted/Daymark/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload Build Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daymark-Build-Logs
+          path: |
+            extracted/**/build/outputs/**
+            extracted/**/build/reports/**
+          if-no-files-found: ignore          echo "ZIP ditemukan: $ZIP_FILE"
 
             rm -rf extracted
             mkdir extracted
